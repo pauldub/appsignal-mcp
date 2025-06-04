@@ -1,0 +1,23 @@
+{
+  "name": "appsignal-mcp",
+  "module": "src/index.ts",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "MCP server for AppSignal error monitoring integration",
+  "scripts": {
+    "start": "bun src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "test": "bun test",
+    "build": "bun build src/index.ts --outfile appsignal-mcp --compile"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.11.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.12"
+  },
+  "bin": {
+    "appsignal-mcp": "./appsignal-mcp"
+  }
+}
