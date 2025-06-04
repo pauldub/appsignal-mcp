@@ -18,7 +18,7 @@ A Model Context Protocol (MCP) server for AppSignal error monitoring API integra
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/appsignal-mcp.git
+git clone https://github.com/pauldub/appsignal-mcp.git
 cd appsignal-mcp
 
 # Install dependencies
