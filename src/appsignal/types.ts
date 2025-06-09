@@ -76,6 +76,16 @@ export interface PerformanceSample {
   exception: null;
 }
 
+// Union type for any sample
+export type Sample = ErrorSample | PerformanceSample;
+
+// Sample type enum
+export enum SampleType {
+  ALL = 'all',
+  ERROR = 'errors',
+  PERFORMANCE = 'performance'
+}
+
 // Search Filters Interface
 export interface SampleFilters {
   action_id?: string;

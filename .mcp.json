@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "appsignal-mcp": {
+      "type": "stdio",
+      "command": "bun",
+      "args": [
+        "run",
+        "start"
+      ],
+      "env": {
+        "APPSIGNAL_API_TOKEN": "your-api-token"
+      }
+    }
+  }
+}

@@ -3,33 +3,56 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { Config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { fetchErrorSample, searchErrorSamples } from '../appsignal/client';
-import { ErrorSample } from '../appsignal/types';
+import { fetchSample, searchSamples } from '../appsignal/client';
+import { Sample, ErrorSample, PerformanceSample, SampleType } from '../appsignal/types';
 
 /**
- * Format an error sample for better readability
+ * Format a sample for better readability based on its type
  */
-function formatErrorSample(sample: ErrorSample) {
-  const formattedSample = {
-    id: sample.id,
-    action: sample.action,
-    path: sample.path,
-    status: sample.status,
-    duration: sample.duration,
-    hostname: sample.hostname,
-    time: sample.time,
-    environment: sample.environment || {},
-    params: sample.params || {},
-    session_data: sample.session_data || {},
-    tags: sample.tags || {},
-    exception: sample.exception ? {
-      message: sample.exception.message,
-      name: sample.exception.name,
-      backtrace: sample.exception.backtrace || []
-    } : null
-  };
-
-  return formattedSample;
+function formatSample(sample: Sample) {
+  const isError = sample.is_exception === true;
+  
+  if (isError) {
+    const errorSample = sample as ErrorSample;
+    return {
+      id: errorSample.id,
+      type: 'error',
+      action: errorSample.action,
+      path: errorSample.path,
+      status: errorSample.status,
+      duration: errorSample.duration,
+      hostname: errorSample.hostname,
+      time: errorSample.time,
+      environment: errorSample.environment || {},
+      params: errorSample.params || {},
+      session_data: errorSample.session_data || {},
+      tags: errorSample.tags || {},
+      exception: errorSample.exception ? {
+        message: errorSample.exception.message,
+        name: errorSample.exception.name,
+        backtrace: errorSample.exception.backtrace || []
+      } : null
+    };
+  } else {
+    const perfSample = sample as PerformanceSample;
+    return {
+      id: perfSample.id,
+      type: 'performance',
+      action: perfSample.action,
+      path: perfSample.path,
+      status: perfSample.status,
+      duration: perfSample.duration,
+      db_runtime: perfSample.db_runtime,
+      view_runtime: perfSample.view_runtime,
+      hostname: perfSample.hostname,
+      time: perfSample.time,
+      allocation_count: perfSample.allocation_count,
+      environment: perfSample.environment || {},
+      params: perfSample.params || {},
+      session_data: perfSample.session_data || {},
+      events: perfSample.events || []
+    };
+  }
 }
 
 /**
@@ -42,20 +65,20 @@ export async function startServer(config: Config) {
     version: '1.0.0',
   }, { capabilities: { logging: {} } });
 
-  // Add 'get_error_sample' tool
+  // Add 'get_sample' tool
   server.tool(
-    'get_error_sample',
-    'Get details about a specific AppSignal error sample by ID',
+    'get_sample',
+    'Get details about a specific AppSignal sample by ID (error or performance)',
     {
-      sampleId: z.string().describe('The AppSignal error sample ID'),
+      sampleId: z.string().describe('The AppSignal sample ID'),
       appId: z.string().describe('The AppSignal application ID'),
     },
     async ({ sampleId, appId }) => {
-      logger.info(`Fetching AppSignal error sample: ${sampleId} from app: ${appId}`);
+      logger.info(`Fetching AppSignal sample: ${sampleId} from app: ${appId}`);
       
       try {
-        const sample = await fetchErrorSample(sampleId, appId);
-        const formattedSample = formatErrorSample(sample);
+        const sample = await fetchSample(sampleId, appId);
+        const formattedSample = formatSample(sample);
         
         return {
           content: [
@@ -66,7 +89,7 @@ export async function startServer(config: Config) {
           ],
         };
       } catch (error: any) {
-        logger.error(`Error fetching AppSignal error sample ${sampleId}:`, error);
+        logger.error(`Error fetching AppSignal sample ${sampleId}:`, error);
         
         // Handle different error cases
         if (error.status === 404) {
@@ -74,7 +97,7 @@ export async function startServer(config: Config) {
             content: [
               {
                 type: 'text',
-                text: `Error sample ${sampleId} not found`,
+                text: `Sample ${sampleId} not found`,
               }
             ],
             isError: true,
@@ -97,7 +120,7 @@ export async function startServer(config: Config) {
           content: [
             {
               type: 'text',
-              text: error.message || 'Error fetching AppSignal error sample',
+              text: error.message || 'Error fetching AppSignal sample',
             }
           ],
           isError: true,
@@ -106,13 +129,14 @@ export async function startServer(config: Config) {
     }
   );
 
-  // Add 'search_error_samples' tool
+  // Add 'search_samples' tool
   server.tool(
-    'search_error_samples',
-    'Search for error samples in an AppSignal application',
+    'search_samples',
+    'Search for samples in an AppSignal application (errors, performance, or all)',
     {
       appId: z.string().describe('The AppSignal application ID'),
-      exception: z.string().optional().describe('Filter by exception name (e.g., NoMethodError)'),
+      sample_type: z.enum(['all', 'errors', 'performance']).optional().default('errors').describe('Type of samples to search (all, errors, performance)'),
+      exception: z.string().optional().describe('Filter by exception name (e.g., NoMethodError) - only for error samples'),
       action_id: z.string().optional().describe('Filter by action name (e.g., BlogPostsController-hash-show)'),
       since: z.union([z.string(), z.number()]).optional().describe('Start timestamp in UTC (timestamp or ISO format)'),
       before: z.union([z.string(), z.number()]).optional().describe('End timestamp in UTC (timestamp or ISO format)'),
@@ -120,16 +144,18 @@ export async function startServer(config: Config) {
       count_only: z.boolean().optional().describe('Only return the count, not the samples'),
     },
     async (params) => {
-      const { appId, exception, action_id, since, before, limit, count_only } = params;
+      const { appId, sample_type, exception, action_id, since, before, limit, count_only } = params;
       const filters = { exception, action_id, since, before, limit, count_only };
+      const sampleType = sample_type as SampleType;
       
-      logger.info(`Searching AppSignal error samples in app ${appId} with filters:`, filters);
+      logger.info(`Searching AppSignal ${sampleType} samples in app ${appId} with filters:`, filters);
       
       try {
-        const result = await searchErrorSamples(filters, appId);
+        const result = await searchSamples(filters, appId, sampleType);
         
         const formattedResult = {
           count: result.count,
+          sample_type: sampleType,
           samples: result.log_entries.map(entry => ({
             id: entry.id,
             action: entry.action,
@@ -151,7 +177,7 @@ export async function startServer(config: Config) {
           ],
         };
       } catch (error: any) {
-        logger.error(`Error searching AppSignal error samples:`, error);
+        logger.error(`Error searching AppSignal ${sampleType} samples:`, error);
         
         // Handle different error cases
         if (error.status === 401) {
@@ -170,7 +196,7 @@ export async function startServer(config: Config) {
           content: [
             {
               type: 'text',
-              text: error.message || 'Error searching AppSignal error samples',
+              text: error.message || `Error searching AppSignal ${sampleType} samples`,
             }
           ],
           isError: true,

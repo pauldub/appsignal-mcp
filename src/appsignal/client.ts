@@ -1,5 +1,5 @@
 import { getAuthToken } from './auth';
-import { ErrorSample, SampleFilters, SampleResponse, SamplesResponse, AppSignalError } from './types';
+import { Sample, SampleFilters, SamplesResponse, AppSignalError, SampleType } from './types';
 import { loadConfig } from '../utils/config';
 import { logger } from '../utils/logger';
 
@@ -12,12 +12,12 @@ const BASE_URL = 'https://appsignal.com/api';
  * @param appId The AppSignal application ID
  * @returns The sample data
  */
-export async function fetchErrorSample(sampleId: string, appId: string): Promise<ErrorSample> {
+export async function fetchSample(sampleId: string, appId: string): Promise<Sample> {
   if (!appId) {
     throw new Error('AppSignal application ID is required.');
   }
 
-  logger.debug(`Fetching error sample ${sampleId} from AppSignal API`);
+  logger.debug(`Fetching sample ${sampleId} from AppSignal API`);
 
   const token = getAuthToken(config);
   const url = `${BASE_URL}/${appId}/samples/${sampleId}.json?token=${token}`;
@@ -36,12 +36,12 @@ export async function fetchErrorSample(sampleId: string, appId: string): Promise
         status: response.status,
         statusText: response.statusText,
         body: errorBody,
-        message: `Failed to fetch error sample ${sampleId}: ${response.status} ${response.statusText}`,
+        message: `Failed to fetch sample ${sampleId}: ${response.status} ${response.statusText}`,
       };
       throw error;
     }
 
-    const data = await response.json() as ErrorSample;
+    const data = await response.json() as Sample;
     return data;
   } catch (error: any) {
     if (error.status) {
@@ -50,27 +50,28 @@ export async function fetchErrorSample(sampleId: string, appId: string): Promise
     }
     
     // This is some other error (network, etc)
-    logger.error(`Error fetching AppSignal error sample:`, error);
+    logger.error(`Error fetching AppSignal sample:`, error);
     throw {
       status: 500,
       statusText: 'Internal Server Error',
-      message: `Failed to fetch error sample ${sampleId}: ${error.message}`,
+      message: `Failed to fetch sample ${sampleId}: ${error.message}`,
     };
   }
 }
 
 /**
- * Searches for error samples with the given filters
+ * Searches for samples with the given filters
  * @param filters Object containing search criteria
  * @param appId The AppSignal application ID
+ * @param sampleType The type of samples to search for (errors, performance, or all)
  * @returns List of samples matching the criteria
  */
-export async function searchErrorSamples(filters: SampleFilters, appId: string): Promise<SamplesResponse> {
+export async function searchSamples(filters: SampleFilters, appId: string, sampleType: SampleType = SampleType.ERROR): Promise<SamplesResponse> {
   if (!appId) {
     throw new Error('AppSignal application ID is required.');
   }
 
-  logger.debug(`Searching error samples in AppSignal API with filters:`, filters);
+  logger.debug(`Searching ${sampleType} samples in AppSignal API with filters:`, filters);
 
   const token = getAuthToken(config);
   
@@ -87,7 +88,8 @@ export async function searchErrorSamples(filters: SampleFilters, appId: string):
   if (filters.limit) queryParams.append('limit', filters.limit.toString());
   if (filters.count_only) queryParams.append('count_only', filters.count_only.toString());
   
-  const url = `${BASE_URL}/${appId}/samples/errors.json?${queryParams.toString()}`;
+  const endpoint = sampleType === SampleType.ALL ? 'samples' : `samples/${sampleType}`;
+  const url = `${BASE_URL}/${appId}/${endpoint}.json?${queryParams.toString()}`;
 
   try {
     const response = await fetch(url, {
@@ -103,7 +105,7 @@ export async function searchErrorSamples(filters: SampleFilters, appId: string):
         status: response.status,
         statusText: response.statusText,
         body: errorBody,
-        message: `Failed to search error samples: ${response.status} ${response.statusText}`,
+        message: `Failed to search ${sampleType} samples: ${response.status} ${response.statusText}`,
       };
       throw error;
     }
@@ -117,11 +119,11 @@ export async function searchErrorSamples(filters: SampleFilters, appId: string):
     }
     
     // This is some other error (network, etc)
-    logger.error(`Error searching AppSignal error samples:`, error);
+    logger.error(`Error searching AppSignal ${sampleType} samples:`, error);
     throw {
       status: 500,
       statusText: 'Internal Server Error',
-      message: `Failed to search error samples: ${error.message}`,
+      message: `Failed to search ${sampleType} samples: ${error.message}`,
     };
   }
 }
